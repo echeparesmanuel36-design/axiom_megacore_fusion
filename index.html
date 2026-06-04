@@ -2,237 +2,162 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AXIOM MEGACORE // FUSION WEB DEMO</title>
+    <title>AXIOM MEGACORE // THE SURVIVAL MATRIX</title>
     <style>
-        /* CSS3: Estética Búnker Cyberpunk de Axiom Systems */
-        body {
-            margin: 0;
-            background-color: #030307;
-            color: #00ff66;
-            font-family: 'Courier New', Courier, monospace;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-        }
-        #canvas-container {
-            position: relative;
-            border: 2px solid #00ffff;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
-        }
-        canvas {
-            display: block;
-            cursor: none; /* Ocultamos el ratón para pintar nuestro núcleo de luz */
-        }
-        .hud {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.85);
-            border: 1px solid #ff00ff;
-            padding: 10px;
-            font-size: 12px;
-            pointer-events: none;
-            line-height: 1.5;
-        }
+        body { margin: 0; background-color: #030307; color: #00ff66; font-family: 'Courier New', monospace; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; user-select: none; }
+        #container { position: relative; border: 2px solid #00ffff; }
+        canvas { display: block; }
+        .hud { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.85); border: 1px solid #ff00ff; padding: 12px; font-size: 13px; pointer-events: none; }
     </style>
 </head>
 <body>
-
-    <div id="canvas-container">
+    <div id="container">
         <div class="hud">
-            <span style="color: #00ff66;">FPS: 60 (WEB OPTIMIZED)</span><br>
-            <span style="color: #ff00ff;">FUSION CORE: VANILLA JS SIMULATION DEMO</span><br>
-            <span style="color: #00ffff;">ACTIVE AGENTS (BOIDS): <span id="agent-count">0</span></span><br>
-            <span style="color: #ffff00;">MOVE MOUSE TO EMIT PHOTONS</span>
+            <span style="color:#ff0055; font-weight:bold;">¡EVITA QUE LOS AGENTES COLOQUEN SU MATE EN TU NÚCLEO!</span><br>
+            TIEMPO DE SOBREVIDA: <span id="timer">0s</span><br>
+            ESTADO DEL ESCUDO: <span id="shield">100%</span><br>
+            <span style="color:#ffff00;">MUEVE EL RATÓN/DEDO PARA MOVER EL NÚCLEO</span>
         </div>
         <canvas id="axiomCanvas"></canvas>
     </div>
-
     <script>
-        // HTML5 Canvas & Vanilla JS Engine Simulator
-        const canvas = document.getElementById('axiomCanvas');
-        const ctx = canvas.getContext('2d');
-        
-        // Ajustamos tamaño del visor búnker
-        canvas.width = 800;
-        canvas.height = 600;
+        const canvas = document.getElementById('axiomCanvas'); const ctx = canvas.getContext('2d');
+        canvas.width = 800; canvas.height = 600;
 
-        // Estructuras físicas (Paredes/Obstáculos)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playHitSound() {
+            let osc = audioCtx.createOscillator(); let gain = audioCtx.createGain();
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(180, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+        }
+
         const walls = [
-            { x: 150, y: 120, w: 120, h: 120 },
-            { x: 500, y: 100, w: 140, h: 90 },
-            { x: 180, y: 380, w: 110, h: 130 },
-            { x: 550, y: 350, w: 120, h: 120 }
+            { x: 150, y: 120, w: 120, h: 120 }, { x: 500, y: 100, w: 140, h: 90 },
+            { x: 180, y: 380, w: 110, h: 130 }, { x: 550, y: 350, w: 120, h: 120 }
         ];
 
-        // Horda de Agentes IA (Boids) - Ponemos 800 para que JS Vanilla vaya a 60FPS fluidos en web
-        const boids = [];
-        const numBoids = 800;
-        document.getElementById('agent-count').innerText = numBoids;
-
+        const boids = []; const numBoids = 450;
         for (let i = 0; i < numBoids; i++) {
             boids.push({
-                x: Math.random() * (canvas.width - 200) + 100,
-                y: Math.random() * (canvas.height - 200) + 100,
-                vx: (Math.random() - 0.5) * 4,
-                vy: (Math.random() - 0.5) * 4
+                x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+                vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4
             });
         }
 
-        // Tracking del ratón (Núcleo de Luz)
         let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            mouse.x = e.clientX - rect.left;
-            mouse.y = e.clientY - rect.top;
-        });
+        let shield = 100, startTime = Date.now(), survivalTime = 0, gameOver = false;
 
-        // BUCLE PRINCIPAL DEL MOTOR WEB (60 FPS)
-        function engineLoop() {
-            // 1. Limpieza de pantalla profunda
-            ctx.fillStyle = '#010103';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        function updateLight(ex, ey) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            if(!gameOver) { mouse.x = ex; mouse.y = ey; }
+        }
+        canvas.addEventListener('mousemove', (e) => { const r = canvas.getBoundingClientRect(); updateLight(e.clientX - r.left, e.clientY - r.top); });
+        canvas.addEventListener('touchmove', (e) => { const r = canvas.getBoundingClientRect(); const t = e.touches[0]; updateLight(t.clientX - r.left, t.clientY - r.top); e.preventDefault(); }, {passive: false});
 
-            // 2. ACTUALIZACIÓN DE LA IA COLMENA + COLISIONES
+        function loop() {
+            if(gameOver) {
+                ctx.fillStyle = 'black'; ctx.fillRect(0,0,canvas.width,canvas.height);
+                ctx.fillStyle = 'red'; ctx.font = '30px Courier New'; ctx.fillText("NÚCLEO DESTRUIDO // BÚNKER CAÍDO", 160, canvas.height/2);
+                return;
+            }
+
+            ctx.fillStyle = '#010103'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            survivalTime = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById('timer').innerText = survivalTime + "s";
+
+            // WOW MOMENT: A los 20 segundos la horda duplica su furia
+            let hyperMode = survivalTime >= 20;
+
+            // Actualizar horda inteligente
             boids.forEach(boid => {
-                let closeDx = 0, closeDy = 0;
-                let xVelAvg = 0, yVelAvg = 0;
-                let neighbors = 0;
+                let closeDx = 0, closeDy = 0, xVelAvg = 0, yVelAvg = 0, neighbors = 0;
 
-                // Reglas simplificadas de enjambre para rendimiento web
                 boids.forEach(other => {
-                    let dx = boid.x - other.x;
-                    let dy = boid.y - other.y;
+                    let dx = boid.x - other.x, dy = boid.y - other.y;
                     let dist = Math.sqrt(dx*dx + dy*dy);
-
                     if (dist < 30 && dist > 0) {
-                        if (dist < 8) {
-                            closeDx += dx;
-                            closeDy += dy;
-                        }
-                        xVelAvg += other.vx;
-                        yVelAvg += other.vy;
-                        neighbors++;
+                        if (dist < 8) { closeDx += dx; closeDy += dy; }
+                        xVelAvg += other.vx; yVelAvg += other.vy; neighbors++;
                     }
                 });
 
                 if (neighbors > 0) {
-                    xVelAvg /= neighbors;
-                    yVelAvg /= neighbors;
-                    boid.vx += (xVelAvg - boid.vx) * 0.05;
-                    boid.vy += (yVelAvg - boid.vy) * 0.05;
+                    xVelAvg /= neighbors; yVelAvg /= neighbors;
+                    boid.vx += (xVelAvg - boid.vx) * 0.05; boid.vy += (yVelAvg - boid.vy) * 0.05;
                 }
+                boid.vx += closeDx * 0.1; boid.vy += closeDy * 0.1;
+                
+                // Si entra en HyperMode, los bichos orbitan con agresividad roja directa al centro
+                let centerPull = hyperMode ? 0.001 : 0.0002;
+                boid.vx += (canvas.width / 2 - boid.x) * centerPull;
+                boid.vy += (canvas.height / 2 - boid.y) * centerPull;
 
-                boid.vx += closeDx * 0.1;
-                boid.vy += closeDy * 0.1;
-
-                // Atracción gravitatoria suave al centro
-                boid.vx += (canvas.width / 2 - boid.x) * 0.0002;
-                boid.vy += (canvas.height / 2 - boid.y) * 0.0002;
-
-                // Colisión contra obstáculos rígidos
+                // Colisión con muros rígidos
                 walls.forEach(wall => {
                     if (boid.x > wall.x && boid.x < wall.x + wall.w && boid.y > wall.y && boid.y < wall.y + wall.h) {
-                        let midX = wall.x + wall.w / 2;
-                        let midY = wall.y + wall.h / 2;
-                        boid.vx = Math.sign(boid.x - midX) * 2.5;
-                        boid.vy = Math.sign(boid.y - midY) * 2.5;
+                        boid.vx = Math.sign(boid.x - (wall.x + wall.w/2)) * 3;
+                        boid.vy = Math.sign(boid.y - (wall.y + wall.h/2)) * 3;
                     }
                 });
 
-                // Limitador de velocidad
                 let speed = Math.sqrt(boid.vx*boid.vx + boid.vy*boid.vy);
-                if (speed > 3.5) {
-                    boid.vx = (boid.vx / speed) * 3.5;
-                    boid.vy = (boid.vy / speed) * 3.5;
+                let maxSpeed = hyperMode ? 5.5 : 3.5;
+                if (speed > maxSpeed) { boid.vx = (boid.vx / speed) * maxSpeed; boid.vy = (boid.vy / speed) * maxSpeed; }
+
+                boid.x += boid.vx; boid.y += boid.vy;
+                if (boid.x < 0) boid.x = canvas.width; if (boid.x > canvas.width) boid.x = 0;
+                if (boid.y < 0) boid.y = canvas.height; if (boid.y > canvas.height) boid.y = 0;
+
+                // Comprobamos impacto letal con tu núcleo de luz
+                let bdx = boid.x - mouse.x, bdy = boid.y - mouse.y;
+                if(Math.sqrt(bdx*bdx + bdy*bdy) < 6) {
+                    shield -= 0.5;
+                    document.getElementById('shield').innerText = Math.max(0, Math.floor(shield)) + "%";
+                    if(Math.random() < 0.1) playHitSound();
+                    if(shield <= 0) gameOver = true;
                 }
-
-                // Inyección de movimiento
-                boid.x += boid.vx;
-                boid.y += boid.vy;
-
-                // Pantalla infinita estilo Pac-Man
-                if (boid.x < 0) boid.x = canvas.width;
-                if (boid.x > canvas.width) boid.x = 0;
-                if (boid.y < 0) boid.y = canvas.height;
-                if (boid.y > canvas.height) boid.y = 0;
             });
 
-            // 3. MOTOR DE SOMBRAS RAYCASTING EN 360°
-            const numRays = 180; // Cantidad de haces de luz optimizada para navegadores
+            // Raycasting de Sombras atmosféricas
+            const numRays = 120;
             for (let i = 0; i < numRays; i++) {
                 let angle = (i * (360 / numRays)) * Math.PI / 180;
-                let rayDirX = Math.cos(angle);
-                let rayDirY = Math.sin(angle);
-                let maxDist = 220; // Radio del haz de la linterna
+                let rayDirX = Math.cos(angle); let rayDirY = Math.sin(angle);
+                let maxDist = 200;
 
                 walls.forEach(wall => {
-                    let t1 = (wall.x - mouse.x) / rayDirX;
-                    let t2 = (wall.x + wall.w - mouse.x) / rayDirX;
-                    let t3 = (wall.y - mouse.y) / rayDirY;
-                    let t4 = (wall.y + wall.h - mouse.y) / rayDirY;
-
+                    let t1 = (wall.x - mouse.x) / rayDirX; let t2 = (wall.x + wall.w - mouse.x) / rayDirX;
+                    let t3 = (wall.y - mouse.y) / rayDirY; let t4 = (wall.y + wall.h - mouse.y) / rayDirY;
                     let tmin = Math.max(Math.min(t1, t2), Math.min(t3, t4));
                     let tmax = Math.min(Math.max(t1, t2), Math.max(t3, t4));
-
-                    if (tmax >= tmin && tmin > 0 && tmin < maxDist) {
-                        maxDist = tmin; // Corte de luz (Sombra proyectada)
-                    }
+                    if (tmax >= tmin && tmin > 0 && tmin < maxDist) maxDist = tmin;
                 });
-
-                let endX = mouse.x + rayDirX * maxDist;
-                let endY = mouse.y + rayDirY * maxDist;
-
-                // Dibujamos el haz de luz sutil
-                ctx.strokeStyle = 'rgba(255, 230, 150, 0.04)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(mouse.x, mouse.y);
-                ctx.lineTo(endX, endY);
-                ctx.stroke();
+                ctx.strokeStyle = hyperMode ? 'rgba(255, 0, 55, 0.05)' : 'rgba(255, 230, 150, 0.04)';
+                ctx.beginPath(); ctx.moveTo(mouse.x, mouse.y); ctx.lineTo(mouse.x + rayDirX * maxDist, mouse.y + rayDirY * maxDist); ctx.stroke();
             }
 
-            // 4. DIBUJAR LA HORDA GRÁFICA (Cambian de color según la proximidad a la luz)
+            // Pintar bichos de la horda
             boids.forEach(boid => {
-                let dx = boid.x - mouse.x;
-                let dy = boid.y - mouse.y;
-                let distToLight = Math.sqrt(dx*dx + dy*dy);
-
-                ctx.beginPath();
-                if (distToLight < 220) {
-                    ctx.fillStyle = 'rgba(255, 255, 0, 0.85)'; // Revelados: Amarillo brillante
-                    ctx.arc(boid.x, boid.y, 1.8, 0, Math.PI * 2);
-                } else {
-                    ctx.fillStyle = 'rgba(0, 100, 60, 0.3)';   // Ocultos: Verde espectral apagado
-                    ctx.arc(boid.x, boid.y, 1.5, 0, Math.PI * 2);
-                }
-                ctx.fill();
+                let dist = Math.sqrt((boid.x-mouse.x)**2 + (boid.y-mouse.y)**2);
+                ctx.fillStyle = dist < 200 ? (hyperMode ? '#ff0033' : '#ffff00') : 'rgba(0, 100, 60, 0.25)';
+                ctx.beginPath(); ctx.arc(boid.x, boid.y, 1.8, 0, Math.PI * 2); ctx.fill();
             });
 
-            // 5. DIBUJAR LOS OBSTÁCULOS RÍGIDOS
+            // Muros
             walls.forEach(wall => {
-                ctx.fillStyle = '#0c0c14';
-                ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
-                ctx.strokeStyle = '#00ffff';
-                ctx.lineWidth = 1.5;
-                ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+                ctx.fillStyle = '#0c0c14'; ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+                ctx.strokeStyle = '#00ffff'; ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
             });
 
-            // Punto focal de la linterna
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(mouse.x, mouse.y, 4, 0, Math.PI * 2);
-            ctx.fill();
+            // Dibujar núcleo vital blanco
+            ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 6, 0, Math.PI * 2); ctx.fill();
 
-            requestAnimationFrame(engineLoop);
+            requestAnimationFrame(loop);
         }
-
-        // Arrancamos el simulador nativo web
-        engineLoop();
+        loop();
     </script>
 </body>
 </html>
