@@ -24,8 +24,9 @@
    git clone [https://github.com/echeparesmanuel36-design/axiom_megacore_fusion.git](https://github.com/echeparesmanuel36-design/axiom_megacore_fusion.git)
    cd axiom_megacore_fusion
     ```
-   2. **Launch the core:**
-      ```bash
+2. **Launch the core:**
+```bash
 cargo run --release
 ```
+
 Developed by Axiom Systems. ⚡
